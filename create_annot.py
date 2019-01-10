@@ -6,6 +6,9 @@ import argparse
 import os
 import sys
 import matplotlib.pyplot as plt
+import tqdm
+
+import maps
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--base_path", "-b", required=True)
@@ -13,6 +16,9 @@ parser.add_argument("--base_path", "-b", required=True)
 args = parser.parse_args()
 
 ANNOT_FILTER = os.path.join(args.base_path, "Annotations/**/*.xml")
+OUT_FOLDER = os.path.join(args.base_path, "AnnotImg")
+
+os.makedirs(OUT_FOLDER, exist_ok=True)
 
 dbg = True
 
@@ -24,12 +30,21 @@ def break_assert(cond, statement):
         else:
             sys.exit()
 
-def extract_imagesize(xml_node):
+def extract_meta(xml_node):
+    #get filename
+    filenames = xml_node.xpathEval("//filename")
+    break_assert(len(filenames) == 1, "found more than one filename")
+    filename = filenames[0].content.strip()
+
+    #get folder path
+    folders = xml_node.xpathEval("//folder")
+    break_assert(len(folders) == 1, "found more than one folder")
+    folder = folders[0].content.strip()
     #get image size
     imagesizes = xml_node.xpathEval("//imagesize")
     if len(imagesizes) == 0:
         #print("malformed document", xml_node)
-        return None
+        return None, folder, filename
     break_assert(len(imagesizes) == 1, "found more than one image size")
     imagesize = imagesizes[0]
     all_rows = imagesize.xpathEval("nrows")
@@ -39,7 +54,7 @@ def extract_imagesize(xml_node):
     rows = int(all_rows[0].content.strip())
     cols = int(all_cols[0].content.strip())
 
-    return (rows, cols)
+    return (rows, cols), folder, filename
 
 def extract_object(xml_node):
     #get name
@@ -61,45 +76,69 @@ def extract_object(xml_node):
     break_assert(len(usernames) == 1, "found more than one username")
     username = usernames[0].content.strip()
 
-    return name, pts, username
+    return name.lower(), np.array(pts), username.lower()
 
-xml_files = glob.iglob(ANNOT_FILTER, recursive=True)
+def main():
+    xml_files = glob.glob(ANNOT_FILTER, recursive=True)
 
-all_sizes = []
-i = 0
+    not_found = set()
 
-for xml_path in xml_files:
-    with open(xml_path, "r") as f:
-        # remove invalid char in name
-        content = f.read().replace("\x1a", "")
-    
-    doc = xml.parseDoc(content)
-    #doc = xml.parseFile(xml_path)
-    ctxt = doc.xpathNewContext()
+    all_out_files = []
 
-    size = extract_imagesize(ctxt)
-    if size is None:
-        continue
+    for xml_path in tqdm.tqdm(xml_files):
+        with open(xml_path, "r") as f:
+            # remove invalid char in name
+            content = f.read().replace("\x1a", "")
 
+        doc = xml.parseDoc(content)
+        #doc = xml.parseFile(xml_path)
+        ctxt = doc.xpathNewContext()
 
-    if np.prod(size) > 640*640:
-        all_sizes.append(np.prod(size))
-        # import pdb; pdb.set_trace()
-        i+=1
-        print(i, end="\r")
-        continue
-    else:
-        continue
-
-    objects = ctxt.xpathEval("//object")
-    for obj in objects:
-        name, pts, username = extract_object(obj)
-
-        if username == "anonomys":
+        size, folder, filename = extract_meta(ctxt)
+        folder = os.path.join(OUT_FOLDER, folder)
+        out_file = os.path.join(folder, filename.replace("jpg", "png"))
+        if size is None:
             continue
 
-    import pdb; pdb.set_trace()
-    print("done")
+        if np.prod(size) < 640*640:
+            continue
 
-plt.hist(all_sizes, 1000)
-plt.show()
+        objects = ctxt.xpathEval("//object")
+
+        annot_img = np.ones(size)*255
+
+        types = set()
+
+        for obj in objects:
+            name, pts, username = extract_object(obj)
+            types.add(name)
+            if username == "anonymous":
+                continue
+            name = name.replace("crop", "").replace("occluded", "").strip()
+            if name not in maps.sun_to_id:
+                if name not in not_found:
+                    print("could not find", name)
+                    not_found.add(name)
+                continue
+
+            colour = maps.sun_to_id[name]
+            annot_img = cv2.fillPoly(annot_img, pts =[pts], color=colour)
+
+        # print(types, "\n")
+        # cv2.imshow("test", (255*annot_img/np.max(annot_img)).astype(np.uint8))
+        # cv2.waitKey()
+        os.makedirs(folder, exist_ok=True)
+        cv2.imwrite(out_file, annot_img.astype(np.uint8))
+        all_out_files.append(out_file)
+
+        # import pdb; pdb.set_trace()
+        # print("done")
+        # i+=1
+        # print(i, end="\r")
+
+    # print(i)
+    with open('all_sun_annot.txt', 'w') as f:
+        f.write('\n'.join(all_out_files))
+
+if __name__ == "__main__":
+    main()
