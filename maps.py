@@ -1,5 +1,5 @@
 sun_to_city = {
-    "Wall": "wall",
+    "Wall": "",
     "Window": "building",
     "Chair": "ood",
     "Floor": "ood",

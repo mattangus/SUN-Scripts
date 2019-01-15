@@ -99,6 +99,10 @@ def main():
         out_file = os.path.join(folder, filename.replace("jpg", "png"))
         if size is None:
             continue
+        
+        img_file = os.path.join(folder.replace("AnnotImg", "Images"), filename)
+        if not os.path.exists(img_file):
+            continue
 
         if np.prod(size) < 640*640:
             continue
@@ -108,6 +112,8 @@ def main():
         annot_img = np.ones(size)*255
 
         types = set()
+
+        has_values = False
 
         for obj in objects:
             name, pts, username = extract_object(obj)
@@ -121,22 +127,24 @@ def main():
                     not_found.add(name)
                 continue
 
+            has_values = True
+
             colour = maps.sun_to_id[name]
             annot_img = cv2.fillPoly(annot_img, pts =[pts], color=colour)
 
         # print(types, "\n")
         # cv2.imshow("test", (255*annot_img/np.max(annot_img)).astype(np.uint8))
         # cv2.waitKey()
-        os.makedirs(folder, exist_ok=True)
-        cv2.imwrite(out_file, annot_img.astype(np.uint8))
-        all_out_files.append(out_file)
+        if has_values:
+            os.makedirs(folder, exist_ok=True)
+            cv2.imwrite(out_file, annot_img.astype(np.uint8))
+            all_out_files.append(img_file + "," + out_file)
 
-        # import pdb; pdb.set_trace()
         # print("done")
         # i+=1
         # print(i, end="\r")
 
-    # print(i)
+    print(len(all_out_files))
     with open('all_sun_annot.txt', 'w') as f:
         f.write('\n'.join(all_out_files))
 
